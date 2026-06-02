@@ -1,0 +1,22 @@
+/.DS_Store
+/.idea
+/.venv
+/77175d410652d96983b3673d389d2bb0.png
+/build
+/dist
+/GUI-Agent_数据采集需求-0417(1)(1).pdf
+/gui-datatype-0520 copy.json
+/gui-datatype-0520.json
+/logo.icns
+/MacOS标注.xmind
+/main.spec
+/permission_checker.py
+/run.sh
+/start.sh
+/test
+/test.py
+/test_folder_structure.py
+/test_hotkey.py
+/test_keys_input.py
+/test_permission.py
+/__pycache__
