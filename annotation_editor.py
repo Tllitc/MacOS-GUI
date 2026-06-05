@@ -103,7 +103,7 @@ class StepEditorWidget(QWidget):
             "鼠标移动": "mouse_move",
             "滚动": "scroll",
             "文本输入": "type",
-            "按键组合": "keys",
+            "按键组合": "key",
             "等待": "wait",
             "回答用户": "answer",
             "任务完成": "terminate",
@@ -466,7 +466,7 @@ class StepEditorWidget(QWidget):
             # 隐藏滚动测量按钮
             self.scroll_measure_btn.hide()
             self.scroll_finish_btn.hide()
-        elif action_type == "keys":
+        elif action_type == "key":
             self.show_params([3])  # 按键
             # 隐藏滚动测量按钮
             self.scroll_measure_btn.hide()
@@ -564,8 +564,8 @@ class StepEditorWidget(QWidget):
                 self.text_input.setPlainText(action["text"])
 
             # 加载按键组合
-            if "keys" in action:
-                keys = action["keys"]
+            if "key" in action:
+                keys = action["key"]
                 if isinstance(keys, list):
                     keys_inputs = [self.keys_input_1, self.keys_input_2, self.keys_input_3, self.keys_input_4]
                     for i, key in enumerate(keys):
@@ -589,8 +589,8 @@ class StepEditorWidget(QWidget):
         # 构建动作对象
         action = {"action": action_type}
 
-        # 添加坐标（open_app、open_url、terminate、answer、wait、scroll不需要坐标）
-        if action_type not in ["open_app", "open_url", "terminate", "answer", "wait", "scroll"]:
+        # 添加坐标（open_app、open_url、terminate、answer、wait、scroll、key不需要坐标）
+        if action_type not in ["open_app", "open_url", "terminate", "answer", "wait", "scroll", "key"]:
             try:
                 x = int(self.coord_x_input.text()) if self.coord_x_input.text() else 0
                 y = int(self.coord_y_input.text()) if self.coord_y_input.text() else 0
@@ -616,14 +616,14 @@ class StepEditorWidget(QWidget):
             action["text"] = text
 
         # 添加按键组合（用于 keys 动作）
-        if action_type == "keys":
+        if action_type == "key":
             keys_list = []
             for keys_input in [self.keys_input_1, self.keys_input_2, self.keys_input_3, self.keys_input_4]:
                 key_text = keys_input.text().strip()
                 if key_text:
                     keys_list.append(key_text)
             if keys_list:
-                action["keys"] = keys_list
+                action["key"] = keys_list
 
         # 添加元素名称（所有动作都包含element字段，即使为空）
         element = self.element_input.text().strip()
@@ -647,9 +647,9 @@ class StepEditorWidget(QWidget):
 
         # 构建完整步骤数据
         if action_type == "terminate":
-            # terminate 动作不包含 intent 字段，而是使用 implement 字段
+            # terminate 动作使用 intent 字段
             data = {
-                "implement": "任务已完成",
+                "intent": "任务已完成",
                 "CoT": self.cot_input.toPlainText().strip(),
                 "observation": {
                     "screenshot": "",  # 稍后由外部设置
@@ -698,6 +698,7 @@ class AnnotationEditor(QMainWindow):
         self.screenshot_counter = 0
 
         self.recorder = ScreenRecorder()
+        self.recorded_video_filename = None  # 录制停止后保存的视频文件名
 
         self.init_ui()
 
@@ -905,7 +906,6 @@ class AnnotationEditor(QMainWindow):
         """截图完成回调"""
         # 检查是否被取消
         if selection_type == "cancelled":
-            # 用户取消了截图，重新显示主窗口
             self.restore_window()
             self.status_label.setText("截图已取消")
             return
@@ -913,6 +913,13 @@ class AnnotationEditor(QMainWindow):
         # 保存截图（整个任务共用一个 gui_number）
         if self.gui_number is None:
             self.gui_number = self.data_manager.get_next_gui_number()
+
+        # 首次截图时，以截图物理分辨率为准更新 screen_size
+        if self.screenshot_counter == 0 and original_pixmap and not original_pixmap.isNull():
+            self.screen_info["screen_size"] = [
+                original_pixmap.width(),
+                original_pixmap.height()
+            ]
 
         self.screenshot_counter += 1
         screenshot_number = f"{self.screenshot_counter:04d}"
@@ -1086,7 +1093,7 @@ class AnnotationEditor(QMainWindow):
             editor = self.steps[self.current_step_index]["editor"]
             action_type_chinese = editor.action_type_combo.currentText()
             action_type = editor.action_type_mapping.get(action_type_chinese, action_type_chinese)
-            if action_type == "terminate":
+            if action_type in ("terminate", "answer"):
                 self.save_current_step()
                 return
         self.hide_window()
@@ -1130,11 +1137,17 @@ class AnnotationEditor(QMainWindow):
             self.save_current_round()
             QTimer.singleShot(300, lambda: self.start_new_round(from_answer=True))
         elif actions and actions[0].get("action") == "terminate":
-            # 任务完成动作
+            # 任务完成动作：先停止录屏，等待视频完整写入后再弹窗
             current_step["data"] = step_data
             self.status_label.setText(f"步骤 {step_num} 已保存（任务完成）")
 
-            # 默认结束任务，直接询问是否创建新的标注任务
+            # 立即停止录屏，确保视频文件完整写入
+            if self.recorder.is_recording():
+                self.recorded_video_filename = self.recorder.stop()
+                if self.recorded_video_filename:
+                    print(f"⏹ 录制完成: {self.recorded_video_filename}")
+
+            # 录屏已停止，再显示后续对话框
             QTimer.singleShot(300, self.show_new_task_dialog)
         else:
             # 普通步骤
@@ -1295,10 +1308,15 @@ class AnnotationEditor(QMainWindow):
             self.app_type  # 传入应用类型
         )
 
-        video_filename = self.recorder.stop()
-        if video_filename:
-            merged_data["recording_video"] = video_filename
-            print(f"⏹ 录制完成: {video_filename}")
+        # 使用已保存的视频文件名（terminate 时已提前停止录屏）
+        if self.recorded_video_filename:
+            merged_data["recording_video"] = self.recorded_video_filename
+        elif self.recorder.is_recording():
+            # 兜底：如果录屏还在进行中（非正常路径），停止并获取文件名
+            video_filename = self.recorder.stop()
+            if video_filename:
+                merged_data["recording_video"] = video_filename
+                print(f"⏹ 录制完成: {video_filename}")
 
         # 清空默认的 messages，重新构建
         merged_data["messages"] = []
@@ -1355,5 +1373,5 @@ class AnnotationEditor(QMainWindow):
     def closeEvent(self, event):
         """窗口关闭事件"""
         if self.recorder.is_recording():
-            self.recorder.stop()
+            self.recorded_video_filename = self.recorder.stop()
         event.accept()

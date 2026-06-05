@@ -320,7 +320,6 @@ def main():
     # perm_status, perm_tip = check_and_request_all_permissions()
 
     app = QApplication(sys.argv)
-
     app.setStyle("Fusion")
 
     # 先初始化全局快捷键监听器对象（不启动，等窗口显示后再启动）
@@ -336,13 +335,17 @@ def main():
     print("创建主窗口...")
     window = InitTaskWindow(hotkey_listener)
 
-    # 窗口显示后再启动全局快捷键（此时 Qt 的 CFRunLoop 已就绪）
-    QTimer.singleShot(500, hotkey_listener.start_listening)
-
+    # 立即显示窗口，避免 macOS 认为应用无响应（灰色标题栏）
     print("显示窗口...")
     window.show()
     window.raise_()
     window.activateWindow()
+
+    # 强制处理事件队列，让窗口立即渲染，防止灰色标题栏
+    app.processEvents()
+
+    # 窗口显示后延迟启动全局快捷键，减少等待时间
+    QTimer.singleShot(200, hotkey_listener.start_listening)
 
     print("程序已启动，窗口应该已显示")
     print("如果窗口未显示，请检查 macOS 权限设置")

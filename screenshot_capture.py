@@ -63,6 +63,10 @@ class ScreenshotCaptureWindow(QWidget):
         screen = QApplication.primaryScreen()
         self.full_pixmap = screen.grabWindow(0)
         
+        # 计算物理像素与逻辑像素的缩放比例（macOS Retina 屏幕）
+        # 截图分辨率（物理像素）与屏幕逻辑分辨率的比值
+        self.scale_factor = self.full_pixmap.width() / self.screen_geometry.width() if self.screen_geometry.width() > 0 else 1.0
+        
         # 设置背景为半透明遮罩
         self.setStyleSheet("background-color: rgba(0, 0, 0, 100);")
     
@@ -184,7 +188,7 @@ class ScreenshotCaptureWindow(QWidget):
     
     def handle_selection(self, rect, selection_type):
         """处理用户选择 - 不关闭窗口，等待 Ctrl+S 确认"""
-        # 计算相对于屏幕的坐标
+        # 存储逻辑像素坐标（widget 坐标系），发信号时再转换为物理像素
         x = rect.x()
         y = rect.y()
         width = rect.width()
@@ -213,7 +217,9 @@ class ScreenshotCaptureWindow(QWidget):
         self.update()
     
     def confirm_selection(self):
-        """确认选择并发送信号"""
+        """确认选择并发送信号（坐标以截图物理分辨率为基准）"""
+        sf = self.scale_factor
+        
         if not self.has_selection or not self.selection_rect:
             if self.full_pixmap:
                 original_pixmap = QPixmap(self.full_pixmap)
@@ -228,66 +234,58 @@ class ScreenshotCaptureWindow(QWidget):
             return
         
         if self.box_count == 2 and self.first_rect and self.second_rect:
-            # 双框模式 - 拖拽动作
-            # 返回两个框的中心点坐标
-            first_center_x = self.first_rect[0] + self.first_rect[2] // 2
-            first_center_y = self.first_rect[1] + self.first_rect[3] // 2
-            second_center_x = self.second_rect[0] + self.second_rect[2] // 2
-            second_center_y = self.second_rect[1] + self.second_rect[3] // 2
+            # 逻辑坐标（用于在 marked_pixmap 上绘制，因为高 DPI 下 QPainter 使用逻辑坐标）
+            l_fr_x, l_fr_y, l_fr_w, l_fr_h = self.first_rect
+            l_sr_x, l_sr_y, l_sr_w, l_sr_h = self.second_rect
             
-            # 使用第一个框作为 selection_rect（兼容性）
-            x, y, width, height = self.first_rect
+            # 逻辑中心点
+            l_first_center_x = l_fr_x + l_fr_w // 2
+            l_first_center_y = l_fr_y + l_fr_h // 2
+            l_second_center_x = l_sr_x + l_sr_w // 2
+            l_second_center_y = l_sr_y + l_sr_h // 2
             
-            # 返回整个屏幕的截图，并在上面绘制两个框
+            # 物理像素坐标（用于 signal 发送给坐标输入框）
+            physical_first_rect = (
+                int(l_fr_x * sf), int(l_fr_y * sf),
+                int(l_fr_w * sf), int(l_fr_h * sf)
+            )
+            physical_second_rect = (
+                int(l_sr_x * sf), int(l_sr_y * sf),
+                int(l_sr_w * sf), int(l_sr_h * sf)
+            )
+            
             if self.full_pixmap:
-                # 保存原始截图（不带标记）
                 original_pixmap = QPixmap(self.full_pixmap)
-                
-                # 创建带标记的截图副本（用于预览）
                 marked_pixmap = QPixmap(self.full_pixmap)
                 
-                # 在截图上绘制两个框
                 painter = QPainter(marked_pixmap)
-                pen = QPen(QColor(255, 0, 0), 3)  # 红色，3像素宽
+                pen = QPen(QColor(255, 0, 0), 3)
                 painter.setPen(pen)
                 
-                # 绘制第一个框（起点）
-                painter.drawRect(QRect(self.first_rect[0], self.first_rect[1], 
-                                      self.first_rect[2], self.first_rect[3]))
-                # 绘制第二个框（终点）
-                painter.drawRect(QRect(self.second_rect[0], self.second_rect[1], 
-                                      self.second_rect[2], self.second_rect[3]))
+                # 在 pixmap 上绘制时使用逻辑坐标（高 DPI 下 QPainter 坐标空间是逻辑像素）
+                painter.drawRect(QRect(l_fr_x, l_fr_y, l_fr_w, l_fr_h))
+                painter.drawRect(QRect(l_sr_x, l_sr_y, l_sr_w, l_sr_h))
                 
                 # 绘制箭头连接两个框
-                from PyQt5.QtGui import QPolygon
-                arrow_start_x = first_center_x
-                arrow_start_y = first_center_y
-                arrow_end_x = second_center_x
-                arrow_end_y = second_center_y
-                
-                # 计算箭头方向
                 import math
-                angle = math.atan2(arrow_end_y - arrow_start_y, arrow_end_x - arrow_start_x)
+                angle = math.atan2(l_second_center_y - l_first_center_y,
+                                   l_second_center_x - l_first_center_x)
                 arrow_length = 15
                 arrow_angle = math.pi / 6
                 
-                # 箭头的两个侧点
-                x1 = arrow_end_x - arrow_length * math.cos(angle - arrow_angle)
-                y1 = arrow_end_y - arrow_length * math.sin(angle - arrow_angle)
-                x2 = arrow_end_x - arrow_length * math.cos(angle + arrow_angle)
-                y2 = arrow_end_y - arrow_length * math.sin(angle + arrow_angle)
+                x1 = l_second_center_x - arrow_length * math.cos(angle - arrow_angle)
+                y1 = l_second_center_y - arrow_length * math.sin(angle - arrow_angle)
+                x2 = l_second_center_x - arrow_length * math.cos(angle + arrow_angle)
+                y2 = l_second_center_y - arrow_length * math.sin(angle + arrow_angle)
                 
-                # 绘制箭头线
-                painter.drawLine(arrow_start_x, arrow_start_y, arrow_end_x, arrow_end_y)
-                # 绘制箭头头部
-                painter.drawLine(arrow_end_x, arrow_end_y, int(x1), int(y1))
-                painter.drawLine(arrow_end_x, arrow_end_y, int(x2), int(y2))
+                painter.drawLine(l_first_center_x, l_first_center_y,
+                                 l_second_center_x, l_second_center_y)
+                painter.drawLine(l_second_center_x, l_second_center_y, int(x1), int(y1))
+                painter.drawLine(l_second_center_x, l_second_center_y, int(x2), int(y2))
                 
                 painter.end()
                 
-                # 发送信号（包含双框信息）
-                # rect_info 现在是一个元组，包含两个框的信息
-                dual_rect_info = (self.first_rect, self.second_rect)
+                dual_rect_info = (physical_first_rect, physical_second_rect)
                 self.capture_completed.emit(
                     original_pixmap,
                     marked_pixmap, 
@@ -295,58 +293,52 @@ class ScreenshotCaptureWindow(QWidget):
                     "drag"
                 )
             
-            # 关闭窗口
             self.close()
         else:
-            # 单框模式 - 原有逻辑
-            x, y, width, height = self.selection_rect
+            # 单框模式
+            lx, ly, lw, lh = self.selection_rect  # 逻辑坐标
+            # 物理像素坐标（用于 signal 发送给坐标输入框）
+            physical_rect_info = (
+                int(lx * sf), int(ly * sf),
+                int(lw * sf), int(lh * sf)
+            )
             
-            # 返回整个屏幕的截图，并在上面绘制选区框或点击标记
             if self.full_pixmap:
-                # 保存原始截图（不带标记）
                 original_pixmap = QPixmap(self.full_pixmap)
-                
-                # 创建带标记的截图副本（用于预览）
                 marked_pixmap = QPixmap(self.full_pixmap)
                 
-                # 在截图上绘制标识
                 painter = QPainter(marked_pixmap)
                 
                 if self.selection_type == "click":
-                    # 点击动作：绘制红色十字准星和圆点
-                    center_x = x + width // 2
-                    center_y = y + height // 2
+                    # 在 pixmap 上绘制时使用逻辑坐标（高 DPI 下 QPainter 坐标空间是逻辑像素）
+                    center_x = lx + lw // 2
+                    center_y = ly + lh // 2
                     
-                    # 设置画笔 - 红色，3像素宽
                     pen = QPen(QColor(255, 0, 0), 3)
                     painter.setPen(pen)
                     
-                    # 绘制十字线（长度为20像素）
                     cross_size = 20
-                    painter.drawLine(center_x - cross_size, center_y, center_x + cross_size, center_y)  # 横线
-                    painter.drawLine(center_x, center_y - cross_size, center_x, center_y + cross_size)  # 竖线
+                    painter.drawLine(center_x - cross_size, center_y, center_x + cross_size, center_y)
+                    painter.drawLine(center_x, center_y - cross_size, center_x, center_y + cross_size)
                     
-                    # 绘制中心圆点
                     painter.setBrush(QColor(255, 0, 0))
                     painter.drawEllipse(center_x - 5, center_y - 5, 10, 10)
                     
                 else:
-                    # 拉框动作：绘制红色边框
-                    pen = QPen(QColor(255, 0, 0), 3)  # 红色，3像素宽
+                    pen = QPen(QColor(255, 0, 0), 3)
                     painter.setPen(pen)
-                    painter.drawRect(QRect(x, y, width, height))
+                    # 在 pixmap 上绘制时使用逻辑坐标
+                    painter.drawRect(QRect(lx, ly, lw, lh))
                 
                 painter.end()
                 
-                # 发送信号（原始截图 + 带标记的截图 + 选区信息）
                 self.capture_completed.emit(
                     original_pixmap,
                     marked_pixmap, 
-                    self.selection_rect,
+                    physical_rect_info,
                     self.selection_type
                 )
             
-            # 关闭窗口
             self.close()
     
     def keyPressEvent(self, event):

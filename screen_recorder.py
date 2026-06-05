@@ -50,19 +50,23 @@ class ScreenRecorder:
         if self.process is None:
             return None
 
+        # 通过 stdin 发送换行符通知 screencapture 停止录制
         try:
             self.process.stdin.write(b"\n")
             self.process.stdin.flush()
         except Exception:
             pass
 
+        # 优先等待进程自然退出，给 screencapture 充足时间写入 moov atom
         try:
-            self.process.wait(timeout=15)
+            self.process.wait(timeout=30)
         except subprocess.TimeoutExpired:
+            # 发送 SIGINT（比 SIGKILL 温和，screencapture 有机会清理资源）
             try:
                 self.process.send_signal(signal.SIGINT)
-                self.process.wait(timeout=5)
+                self.process.wait(timeout=10)
             except subprocess.TimeoutExpired:
+                # 最后手段才用 SIGKILL，此时元数据丢失不可避免
                 self.process.kill()
                 self.process.wait()
 
@@ -74,7 +78,8 @@ class ScreenRecorder:
 
         self.process = None
 
-        time.sleep(0.3)
+        # 等待文件系统刷新，确保 moov atom 完全写入磁盘
+        time.sleep(1.0)
 
         if self.output_path and os.path.exists(self.output_path) and os.path.getsize(self.output_path) > 0:
             return self.video_filename
