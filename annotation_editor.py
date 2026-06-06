@@ -781,6 +781,9 @@ class AnnotationEditor(QMainWindow):
         self.rounds = []  # 存储所有轮次的数据
         self.current_round_index = 0  # 当前轮次索引
 
+        # 拉框坐标收集（保存到独立的 _coords.json 文件）
+        self.all_coords_entries = []
+
     def setup_shortcuts(self):
         """连接全局快捷键监听器的信号"""
         if self.hotkey_listener:
@@ -1201,6 +1204,54 @@ class AnnotationEditor(QMainWindow):
             "trajectory": trajectory
         })
 
+        # 提取需要坐标的步骤，收集其拉框顶点和中心点坐标
+        coord_action_types = {"left_click", "double_click", "triple_click",
+                              "right_click", "middle_click", "mouse_move",
+                              "left_click_drag"}
+
+        for i, step in enumerate(self.steps):
+            rect_info = step.get("rect_info")
+            if not rect_info:
+                continue
+
+            editor = step["editor"]
+            action_type_chinese = editor.action_type_combo.currentText()
+            action_type = editor.action_type_mapping.get(action_type_chinese, action_type_chinese)
+
+            if action_type not in coord_action_types:
+                continue
+
+            try:
+                if action_type == "left_click_drag":
+                    # 拖拽动作有两个框
+                    if isinstance(rect_info, tuple) and len(rect_info) == 2 and isinstance(rect_info[0], tuple):
+                        first_rect, second_rect = rect_info
+                        x1, y1, w1, h1 = first_rect
+                        x2, y2, w2, h2 = second_rect
+
+                        entry = {
+                            "step": i,
+                            "action": action_type,
+                            "start_vertices": [x1, y1, x1 + w1, y1 + h1],
+                            "start_center": [x1 + w1 // 2, y1 + h1 // 2],
+                            "end_vertices": [x2, y2, x2 + w2, y2 + h2],
+                            "end_center": [x2 + w2 // 2, y2 + h2 // 2]
+                        }
+                        self.all_coords_entries.append(entry)
+                else:
+                    # 单框动作
+                    if isinstance(rect_info, tuple) and len(rect_info) == 4:
+                        x, y, w, h = rect_info
+                        entry = {
+                            "step": i,
+                            "action": action_type,
+                            "vertices": [x, y, x + w, y + h],
+                            "center": [x + w // 2, y + h // 2]
+                        }
+                        self.all_coords_entries.append(entry)
+            except Exception as e:
+                print(f"提取步骤 {i} 的坐标信息时出错: {e}")
+
     def show_new_task_dialog(self):
         """显示是否创建新任务的对话框"""
         # 确保主窗口在前台
@@ -1240,6 +1291,9 @@ class AnnotationEditor(QMainWindow):
         if ok and new_instruction.strip():
             # 清空所有轮次数据
             self.rounds = []
+
+            # 清空坐标收集数据
+            self.all_coords_entries = []
 
             # 更新任务指令
             self.task_instruction = new_instruction.strip()
@@ -1338,11 +1392,24 @@ class AnnotationEditor(QMainWindow):
         # 保存合并后的 JSON 文件
         filepath = self.data_manager.save_json_data(merged_data, self.gui_number)
 
+        # 保存拉框坐标到独立 JSON 文件
+        coords_filepath = None
+        if self.all_coords_entries:
+            try:
+                coords_filepath = self.data_manager.save_coords_json(
+                    self.all_coords_entries, self.gui_number
+                )
+            except Exception as e:
+                print(f"保存坐标 JSON 文件时出错: {e}")
+
         if filepath:
+            msg = f"所有轮次数据已保存到:\n{filepath}"
+            if coords_filepath:
+                msg += f"\n拉框坐标已保存到:\n{coords_filepath}"
             QMessageBox.information(
                 self,
                 "保存成功",
-                f"所有轮次数据已保存到:\n{filepath}"
+                msg
             )
             self.close()
         else:

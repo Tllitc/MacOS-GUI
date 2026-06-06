@@ -187,6 +187,25 @@ class DataManager:
         
         return None
     
+    def save_coords_json(self, coords_data, gui_number):
+        """
+        保存拉框坐标信息到独立的 JSON 文件
+        :param coords_data: 坐标数据列表，每个元素包含 step/action/vertices/center
+        :param gui_number: GUI 编号
+        :return: 文件路径或 None (失败时)
+        """
+        gui_dir = self.create_gui_directory(gui_number)
+        filename = f"gui_{gui_number}_coords.json"
+        filepath = os.path.join(gui_dir, filename)
+        
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(coords_data, f, ensure_ascii=False, indent=2)
+            return filepath
+        except Exception as e:
+            print(f"保存坐标 JSON 失败: {e}")
+            return None
+    
     def get_screen_info(self):
         """
         获取屏幕信息
