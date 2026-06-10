@@ -267,14 +267,14 @@ class StepEditorWidget(QWidget):
 
         # 特殊键映射
         key_map = {
-            Qt.Key_Meta: "meta",
-            Qt.Key_Control: "ctrl",
-            Qt.Key_Alt: "alt",
+            Qt.Key_Meta: "control",
+            Qt.Key_Control: "command",
+            Qt.Key_Alt: "option",
             Qt.Key_Shift: "shift",
             Qt.Key_Enter: "enter",
             Qt.Key_Return: "enter",
             Qt.Key_Tab: "tab",
-            Qt.Key_Backspace: "backspace",
+            Qt.Key_Backspace: "delete",
             Qt.Key_Delete: "delete",
             Qt.Key_Escape: "escape",
             Qt.Key_Space: "space",
