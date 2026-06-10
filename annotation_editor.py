@@ -29,6 +29,7 @@ class StepEditorWidget(QWidget):
         # 滚动测量相关变量
         self.scroll_references = []  # 存储参照物的Y坐标列表
         self.is_measuring_scroll = False  # 是否正在测量滚动
+        self.first_reference_coord = None  # 第一个参照物的坐标 (center_x, center_y)
         # 按键组合相关变量
         self.current_keys_input = None  # 当前获得焦点的按键输入框
         self.init_ui()
@@ -308,9 +309,13 @@ class StepEditorWidget(QWidget):
             self.start_reference_capture()
             return
 
+        current_x = None
         current_y = None
         try:
+            x_text = self.coord_x_input.text().strip()
             y_text = self.coord_y_input.text().strip()
+            if x_text:
+                current_x = int(x_text)
             if y_text:
                 current_y = int(y_text)
         except:
@@ -319,6 +324,9 @@ class StepEditorWidget(QWidget):
         if current_y is None:
             QMessageBox.warning(self, "警告", "请先在屏幕上选择一个参照物并拉框！")
             return
+
+        # 保存第一个参照物的坐标
+        self.first_reference_coord = (current_x, current_y)
 
         self.scroll_references = [current_y]
         self.is_measuring_scroll = True
@@ -420,8 +428,16 @@ class StepEditorWidget(QWidget):
 
         self.pixels_input.setText(str(total_pixels))
 
+        # 设置第一参照物坐标
+        if self.first_reference_coord:
+            cx, cy = self.first_reference_coord
+            if cx is not None:
+                self.coord_x_input.setText(str(cx))
+            self.coord_y_input.setText(str(cy))
+
         # 清空参照物列表，但保留pixels值
         self.scroll_references = []
+        self.first_reference_coord = None
 
         QMessageBox.information(self, "测量完成",
             f"滚动测量完成！\n" +
@@ -472,7 +488,7 @@ class StepEditorWidget(QWidget):
             self.scroll_measure_btn.hide()
             self.scroll_finish_btn.hide()
         elif action_type == "scroll":
-            self.show_params([4])  # 滚动像素
+            self.show_params([0, 4])  # 坐标 + 滚动像素
             # 显示滚动测量相关按钮
             self.scroll_measure_btn.show()
             if self.is_measuring_scroll and len(self.scroll_references) >= 2:
@@ -589,8 +605,8 @@ class StepEditorWidget(QWidget):
         # 构建动作对象
         action = {"action": action_type}
 
-        # 添加坐标（open_app、open_url、terminate、answer、wait、scroll、key不需要坐标）
-        if action_type not in ["open_app", "open_url", "terminate", "answer", "wait", "scroll", "key"]:
+        # 添加坐标（open_app、open_url、terminate、answer、wait、key不需要坐标）
+        if action_type not in ["open_app", "open_url", "terminate", "answer", "wait", "key"]:
             try:
                 x = int(self.coord_x_input.text()) if self.coord_x_input.text() else 0
                 y = int(self.coord_y_input.text()) if self.coord_y_input.text() else 0
